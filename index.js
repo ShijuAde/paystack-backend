@@ -1,25 +1,17 @@
 import express from "express";
 import cors from "cors";
+import fetch from "node-fetch";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Health check
 app.get("/", (req, res) => {
   res.json({ status: "ok", message: "Backend is live 🎉" });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
-import fetch from "node-fetch";
-
-/**
- * Verify Paystack payment
- * POST /verify-payment
- * body: { reference }
- */
+// 🔐 Paystack verification endpoint
 app.post("/verify-payment", async (req, res) => {
   const { reference } = req.body;
 
@@ -32,29 +24,32 @@ app.post("/verify-payment", async (req, res) => {
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
         headers: {
-          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`
-        }
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET}`,
+        },
       }
     );
 
     const data = await response.json();
 
-    if (!data.status || data.data.status !== "success") {
+    if (data.status && data.data.status === "success") {
+      return res.json({
+        success: true,
+        message: "Payment verified",
+        data: data.data,
+      });
+    } else {
       return res.status(400).json({
-        verified: false,
-        message: "Payment not successful"
+        success: false,
+        message: "Payment not successful",
       });
     }
-
-    return res.json({
-      verified: true,
-      reference: data.data.reference,
-      amount: data.data.amount / 100,
-      customer: data.data.customer
-    });
-
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Verification failed" });
+    return res.status(500).json({
+      error: "Verification failed",
+      details: err.message,
+    });
   }
 });
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server running on port", PORT));
