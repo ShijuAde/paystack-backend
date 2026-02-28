@@ -1,35 +1,67 @@
-import nodemailer from "nodemailer";
+import express from "express";
+import cors from "cors";
+import fetch from "node-fetch";
+import dotenv from "dotenv";
+import { sendOrderEmails } from "./mailer.js"; // your email module
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+dotenv.config();
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Health check
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "Backend is live 🎉" });
+});
+
+// 🔐 Paystack verification endpoint
+app.post("/verify-payment", async (req, res) => {
+  const { reference, customerEmail, order } = req.body;
+
+  if (!reference || !customerEmail || !order) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.paystack.co/transaction/verify/${reference}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET}`,
+        },
+      }
+    );
+
+    const data = await response.json();
+
+    if (data.status && data.data.status === "success") {
+      // ✅ Payment verified, send emails
+      await sendOrderEmails({
+        customerEmail,
+        adminEmail: process.env.ADMIN_EMAIL,
+        order,
+      });
+
+      return res.json({
+        success: true,
+        message: "Payment verified and emails sent",
+        data: data.data,
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: "Payment not successful",
+      });
+    }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      error: "Verification failed",
+      details: err.message,
+    });
   }
 });
 
-export async function sendOrderEmails({ customerEmail, adminEmail, order }) {
-  const adminMail = {
-    from: process.env.EMAIL_USER,
-    to: adminEmail,
-    subject: "🛒 New Paid Order",
-    html: `
-      <h2>New Order Paid</h2>
-      <pre>${JSON.stringify(order, null, 2)}</pre>
-    `
-  };
-
-  const customerMail = {
-    from: process.env.EMAIL_USER,
-    to: customerEmail,
-    subject: "✅ Order Confirmation",
-    html: `
-      <h2>Thank you for your order</h2>
-      <p>Your payment was successful.</p>
-      <pre>${JSON.stringify(order, null, 2)}</pre>
-    `
-  };
-
-  await transporter.sendMail(adminMail);
-  await transporter.sendMail(customerMail);
-}
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server running on port", PORT));
